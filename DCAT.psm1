@@ -3,7 +3,14 @@
 #   Description : This module defines functions that support creation of DCAT files.
 #   Creator  : matthew.lawler@mdba.gov.au 
 
-#	Usage : 
+#	New Usage : 
+#	The module needs to be imported obviously 
+#	Import-Module DCAT -Force -Verbose 
+
+#	Export-SourceToDCATFolder "G:\IT Languages\Powershell\New"  "J:\Working Documents and Drafts\Corporate Services\ICT Services\Data Management\CKAN\New" 
+
+#############
+#	Old Usage : 
 #	The module needs to be imported obviously 
 #	Import-Module DCAT -Force -Verbose 
 
@@ -21,6 +28,72 @@
 #		Convert-DCATObjToDCATXML | 	
 #	all DCAT files are copied to the target directory 
 #		Add-SafeFile -TargetDir "J:\Working Documents and Drafts\Corporate Services\ICT Services\Data Management\CKAN\Initial" 
+
+
+#############################
+
+function Export-SourceToDCATFolder{ 
+#	::	String -> String -> [DCATFile]
+#	::	SourceDir -> TargetDir -> Folder with DCAT files 
+#	This is NOT a pipelinable function. 
+#	It takes in a SourceDir and a TargetDir and produces a populated folder of DCAT files from the SourceDir inot the TargetDir. 
+
+	[cmdletbinding()]
+	param(
+    [Parameter(
+      Position=0,
+#	0 is first argument 
+      Mandatory=$true,
+      ValueFromPipeline=$false 
+    )]
+    [String]
+    $SourceDir,
+    [Parameter(
+      Position=1,
+      Mandatory=$true,
+      ValueFromPipeline=$false 
+    )]
+    [String]
+    $TargetDir 	
+	)
+	
+	#	Source folder  
+	Set-Location $SourceDir 
+#	Set-Location "T:\" 
+	
+#	$TargetDir = "J:\Working Documents and Drafts\Corporate Services\ICT Services\Data Management\CKAN\T" 	
+
+	Remove-Item -Path $TargetDir\*.dcat -Force 
+
+	Get-ChildItem -File -Recurse | 
+		Convert-FileToDCATProps | 
+		Convert-DCATPropsToDCATObj | 
+		Convert-DCATObjToDCATXML | 	
+		Add-SafeFile -TargetDir $TargetDir
+	
+############
+#	now add the header and footer 
+	Set-Location $TargetDir
+
+#	header and footer for DCAT RDF XML files 	
+	$header = '<rdf:RDF xmlns:foaf="http://xmlns.com/foaf/0.1/" xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+         xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:dcat="http://www.w3.org/ns/dcat#"
+         xmlns:ods="http://open-data-standards.github.com/2012/01/open-data-standards#"
+         xmlns:dct="http://purl.org/dc/terms/">'
+
+	$footer = '	</rdf:RDF>'
+
+	$nameSuffix = '.RDF' 
+
+	Get-ChildItem -File | 
+#	Add-HeaderFooter $header $footer $nameSuffix -Verbose 
+		Add-HeaderFooter $header $footer $nameSuffix 
+	
+#	delete all files except *.RDF.dcat files 
+	Remove-Item -Path $TargetDir\*.dcat  -Exclude *.RDF.dcat 
+} 
 
 #############################
 
@@ -620,3 +693,4 @@ Export-ModuleMember -Function Convert-DCATObjToDCATXML
 Export-ModuleMember -Function Convert-FilepathToFilename 
 Export-ModuleMember -Function Add-SafeFile 
 Export-ModuleMember -Function Add-HeaderFooter 
+Export-ModuleMember -Function Export-SourceToDCATFolder  
