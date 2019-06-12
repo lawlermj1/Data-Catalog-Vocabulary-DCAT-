@@ -97,6 +97,72 @@ function Export-SourceToDCATFolder{
 
 #############################
 
+function Convert-MSDateTimeToCKANDateTime{ 
+#	::	String -> String 
+#	This is NOT a pipelinable function.
+#	use regex to extract year, moth day, hour and minute from a MS formatted date and convert to CKAN/UNIX format 
+#	$_.DateVariable.ToString("yyyy-MM-ddTHH:mm:ss.ffffff")
+
+#	Powershell's polluted output problem returns a boolean as well as the date string! 
+#	write-verbose does not affect the polluted output - if it is takne away the pollution continues. 
+#	so keep using write-verbose until the polluting statement is discovered 
+#	do not use -eq as an assignment operator !!!! 
+
+#	Example: 
+#	$source = 6/08/2018 1:31 PM 
+#	-> 
+#	$target = 2018-08-06T13:31:00.000000 
+
+  [cmdletbinding()]
+  param(
+    [Parameter(
+      Position=0,
+#	0 is first argument 
+      Mandatory=$true, 
+      ValueFromPipeline=$false  
+    )] 
+	[String] 
+    $source 
+  )
+
+#	\d{4} matches year 
+#	\/(\d{2})\/ matches month, but need to remove first and last char [1..2] 
+#	^(\d{1,2})\/ matches day, but need to remove last char [0..1] 
+#	(\d{1,2}): matches hh, but need to remove last char [0..1] + add twelve if PM 
+#	:(\d{2}) matches mm, but need to remove first char [0..1] 
+
+	if ( $source -Match '(\d{4})' ) { $year =  $matches[1] } else { $year = '2999' } 
+#	write-verbose ("year = $year ") 
+	
+	if ( $source -Match '\/(\d{2})\/' ) { $month =  $matches[1] } else { $month = '12' } 
+#	write-verbose ("month = $month ") 
+	
+	if ( $source -Match '^(\d{1,2})\/' ) { $day = $matches[1] } else { $day = '31' } 
+#	write-verbose ("day1 = $day ") 	
+	if ( $day.length -eq 1) { $day = -join ( '0', $day) } else { $day = $day } 
+#	write-verbose ("day2 = $day ") 
+
+	if ( $source -Match '(\d{1,2}):' ) { $hour =  $matches[1] } else { $hour = '12' } 
+#	write-verbose ("hour = $hour ") 
+	
+	[string]$HH = if ( $source -Match 'PM' ) { [int]$hour + 12 } elseif ( [int]$hour -lt 10 ) { -join ( '0', $hour) } else { $hour }
+#	write-verbose ("HH = $HH ") 
+	
+	if ( $source -Match ':(\d{2})' ) { $minute =  $matches[1] } else { $minute = '00' } 
+#	write-verbose ("minute = $minute ") 
+
+	write-verbose ("source = $source ; year = $year ; month = $month ; day = $day ; hour = $hour ; minute = $minute ; HH = $HH ; ") 
+
+#	target format = ("yyyy-MM-ddTHH:mm:ss.ffffff")	
+ 
+	$target = -join ( $year, '-', $month, '-', $day, 'T', $HH, ':', $minute, ':00.000000' ) 
+	
+	write-verbose ("$source is source MS DateTime and $target is the target CKAN DateTime") 
+	return $target 
+}
+
+#############################
+
 function Convert-FileToDCATProps{
 #	::	[System.IO.FileInfo] -> Hashtable 
 #	::	fileObject -> Hashtable
@@ -129,6 +195,14 @@ function Convert-FileToDCATProps{
 	$objFolder = $objShell.namespace($dirname) 
 	
 	$Item = $objFolder.items().item($File) 
+	
+	$unknownDate = '2999-12-31T12:00:00.000000' 
+	
+	$DateCreatedMS = $objFolder.GetDetailsOf($Item, 4) 
+	$DateModifiedMS = $objFolder.GetDetailsOf($Item, 3) 
+#	this fixes the strange formating so the date matches "\d{1,2}\/\d{2}\/\d{4}\s\d{1,2}:\d{2}\s(A|P)M" or [datetime]::ParseExact($DateCreated, "d/MM/yyyy h:mm tt", $null) 
+	$ContentCreatedMS = (($objFolder.GetDetailsOf($Item, 147) -replace '\/.', '/') -replace '\s\W\W', ' ') -replace '^\W', '' 
+	$DateLastSavedMS = (($objFolder.GetDetailsOf($Item, 149) -replace '\/.', '/') -replace '\s\W\W', ' ' ) -replace '^\W', ''	
 
 	$fileProps = [pscustomobject]@{ 
 #	get the directly available file properties 
@@ -141,14 +215,20 @@ function Convert-FileToDCATProps{
 		
 #	get the COMObject DCAT relevant file properties 
 		Size = $objFolder.GetDetailsOf($Item, 1) 
-		DateCreated = $objFolder.GetDetailsOf($Item, 4) 		
-		DateModified = $objFolder.GetDetailsOf($Item, 3)
 		Owner = $objFolder.GetDetailsOf($Item, 10) 
 		Authors = $objFolder.GetDetailsOf($Item, 20) 	
-		Company = $objFolder.GetDetailsOf($Item, 33) 	
-#	this fixes the strange formating so the date matches "\d{1,2}\/\d{2}\/\d{4}\s\d{1,2}:\d{2}\s(A|P)M" or [datetime]::ParseExact($DateCreated, "d/MM/yyyy h:mm tt", $null) 
-		ContentCreated = (($objFolder.GetDetailsOf($Item, 147) -replace '\/.', '/') -replace '\s\W\W', ' ') -replace '^\W', '' 
-		DateLastSaved = (($objFolder.GetDetailsOf($Item, 149) -replace '\/.', '/') -replace '\s\W\W', ' ' ) -replace '^\W', '' 
+		Company = $objFolder.GetDetailsOf($Item, 33)
+		
+#	Dates		
+		DateCreatedMS = $DateCreatedMS
+		DateModifiedMS = $DateModifiedMS
+		ContentCreatedMS = $ContentCreatedMS
+		DateLastSavedMS = $DateLastSavedMS
+		DateCreated = if ($DateCreatedMS -eq "") { $unknownDate } else { Convert-MSDateTimeToCKANDateTime $DateCreatedMS }
+		DateModified = if ($DateModifiedMS -eq "") { $unknownDate } else { Convert-MSDateTimeToCKANDateTime $DateModifiedMS }	
+		ContentCreated = if ($ContentCreatedMS -eq "") { $unknownDate } else { Convert-MSDateTimeToCKANDateTime $ContentCreatedMS } 
+		DateLastSaved = if ($DateLastSavedMS -eq "") { $unknownDate } else { Convert-MSDateTimeToCKANDateTime $DateLastSavedMS } 	
+		
 		Language = $objFolder.GetDetailsOf($Item, 194) 			
 		URL = $objFolder.GetDetailsOf($Item, 199) 	
 		Tags = $objFolder.GetDetailsOf($Item, 18) 
@@ -168,6 +248,7 @@ function Convert-FileToDCATProps{
 	return $fileProps 
 	}
 }
+
 
 #############################
 
@@ -342,8 +423,8 @@ function Convert-DCATPropsToDCATObj{
 		LandingPage = ($_.FullName) 
 
 #	dates 
-		PublishDate = if( ($_.ContentCreated) -eq "" ) { ($_.DateCreated) } else { ($_.ContentCreated) }
-		UpdateDate = if( ($_.DateLastSaved) -eq "" ) { ($_.DateModified) } else { ($_.DateLastSaved) } 
+		PublishDate = if( ($_.ContentCreatedMS) -eq "" ) { ($_.DateCreated) } else { ($_.ContentCreated) }
+		UpdateDate = if( ($_.DateLastSavedMS) -eq "" ) { ($_.DateModified) } else { ($_.DateLastSaved) } 
 		
 		Identifier = $guid 
 #	Data portal address may change. 	
@@ -380,8 +461,8 @@ END:VCARD"
 		Jursidiction = "Commonwealth of Australia" 
 		Homepage = "https://www.mdba.gov.au/" 
 #	These dates require parsing within the file to discover earliest date mentioned.  	
-		TemporalCoverageFrom = if( ($_.ContentCreated) -eq "" ) { ($_.DateCreated) } else { ($_.ContentCreated) }	
-		TemporalCoverageTo = if( ($_.DateLastSaved) -eq "" ) { ($_.DateModified) } else { ($_.DateLastSaved) }			
+		TemporalCoverageFrom = if( ($_.ContentCreatedMS) -eq "" ) { ($_.DateCreated) } else { ($_.ContentCreated) }	
+		TemporalCoverageTo = if( ($_.DateLastSavedMS) -eq "" ) { ($_.DateModified) } else { ($_.DateLastSaved) }			
 #	This requires document parsing and a lookup based on the gazetteer to derive the latitude longitude box. 
 		Geospatial = "Murray-Darling Basin" 
 
@@ -687,6 +768,7 @@ function Add-HeaderFooter{
 #	Place this at the end after all functions. 
 
 Export-ModuleMember -Function Convert-FileToDCATProps
+Export-ModuleMember -Function Convert-MSDateTimeToCKANDateTime
 Export-ModuleMember -Function Get-ExtensionToMimeType 
 Export-ModuleMember -Function Convert-DCATPropsToDCATObj 
 Export-ModuleMember -Function Convert-DCATObjToDCATXML
